@@ -1,0 +1,853 @@
+---
+title: "TauPetExVivo"
+output: powerpoint_presentation
+date: "2026-10-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(amandasscripts)
+load_amandas_libraries()
+
+amanda_theme <- theme_light() + theme(text = element_text(size = 17, family = "Arial"), plot.title = element_text(size = 20, hjust = 0.5), strip.text = element_text(size = 14))
+
+```
+
+```{r Path Dates Patches to ROIs}
+patches <- read.csv("/Users/amandadenning/Library/CloudStorage/Box-Box/Collaborations/JeffPhillips_TauPET_Histo/PathData/all_wildcat_cluster_activation.csv") %>% as.data.frame() # id = box ID, we aggregate across boxes so don't care 
+patches <- patches[, c("case", "slide", "label", "patch", "contrast", "value")]
+
+# Aggregate
+path_data <- aggregate(patches$value, by = list(patches$case, patches$slide, patches$label, patches$contrast), FUN = quantile, probs = 0.99)
+colnames(path_data) <- c("AutopsyID", "Slide_ID", "Label_Num", "Contrast", "Value")
+
+# Map labels - changed code from antemortem paper so body/head all goes to same label, since we ended up ignoring that. Though confirm this later ####
+path_data$Label_Name <- path_data$Label_Num %>% mapvalues(c("163"), c("CA1")) %>% mapvalues(c("165"), c("CA1-SUB")) %>% mapvalues(c("166"), c("CA2"))  %>% mapvalues(c("167"), c("DG-GCL"))  %>% mapvalues(c("168"), c("DG-H"))  %>% mapvalues(c("169"), c("Sub-PrS"))  %>% mapvalues(c("171"), c("EC-med"))  %>% mapvalues(c("172"), c("EC-ctr"))  %>% mapvalues(c("173"), c("EC-lat"))  %>% mapvalues(c("174"), c("BA35"))  %>% mapvalues(c("175"), c("BA36"))  %>% mapvalues(c("176"), c("Amy"))  %>% mapvalues(c("177"), c("aERC"))  %>% mapvalues(c("180"), c("CA3")) %>% mapvalues(c("181"), c("Ba35"))  %>% mapvalues(c("182"), c("Ba36"))  %>% mapvalues(c("183"), c("EC-med"))  %>% mapvalues(c("184"), c("EC-ctr"))  %>% mapvalues(c("185"), c("EC-lat"))  %>% mapvalues(c("209"), c("DG_MolecularCellLayer"))  %>% mapvalues(c("211"), c("h-uncus-DG-GCL"))  %>% mapvalues(c("212"), c("h-uncus-DG-MolecularCellLayer")) %>% mapvalues(c("213"), c("h-uncus-Ca3")) %>% mapvalues(c("214"), c("h-uncus-DG-H")) %>% mapvalues(c("215"), c("Artifact")) 
+# Pivot
+path_data <- pivot_wider(path_data, id_cols = c("AutopsyID"), names_from = c("Contrast", "Label_Name"), values_from = "Value")
+
+# Generate summary hippocampus measurement
+hipp_combined_tangles <- c("tangles_CA1", "tangles_CA1-SUB", "tangles_CA2", "tangles_CA3", "tangles_DG-GCL", "tangles_DG-H", "tangles_Sub-PrS")
+hipp_combined_threads <- c("threads_CA1", "threads_CA1-SUB", "threads_CA2", "threads_CA3", "threads_DG-GCL", "threads_Sub-PrS")
+
+# Check cases with enough ROIs for hipp
+path_data$Has_Tau_Quant_3HippRegions <- 0
+for (row in 1:nrow(path_data)){
+  hippregions <- path_data[row, hipp_combined_tangles]
+  ##Identify cases with at least one DG region
+  has_DG <- 0
+  if(!is.na(hippregions$`tangles_DG-GCL`) | !is.na(hippregions$`tangles_DG-H`)){has_DG <- 1}
+  ##Remove DG regions so not double counted
+  hippregions <- hippregions[!(colnames(hippregions) %in% c("tangles_DG-H_combined", "tangles_DG-GCL_combined"))]
+  ##Check cases with at least 3 regions 
+  if(sum(!is.na(hippregions)) + has_DG >= 3){path_data[row, "Has_Tau_Quant_3HippRegions"] <- 1}
+}
+
+## For threads, DG-H will be removed. Check if after removing DG-GCL, any cases now have less than 3 regions
+DGmismatch <- matrix(NA, ncol = 1) %>% as.data.frame()
+colnames(DGmismatch) <- "AutopsyID"
+for(row in 1:nrow(path_data)){
+  hippregions <- path_data[row, hipp_combined_threads]
+  if(path_data[row, "Has_Tau_Quant_3HippRegions"] == 1){
+    if(sum(!is.na(hippregions)) < 3){DGmismatch <- rbind(DGmismatch, path_data[row, "AutopsyID"])}
+  }
+}
+## DGmismatch is no rows, this indicates there aren't any cases where removing the DG-H layer for threads would make the case now have less than 3 hipp regions. Can just use the Has_Tau_Quant_3HippRegions column name to identify cases where there are at least 3 regions sampled for both tangles and threads. 
+
+# Generate summary scores
+path_data$tangles_hippocampus <- NA
+path_data[path_data$Has_Tau_Quant_3HippRegions %in% 1, "tangles_hippocampus"] <- rowMeans(path_data[path_data$Has_Tau_Quant_3HippRegions == 1, hipp_combined_tangles], na.rm = TRUE)
+
+path_data$threads_hippocampus <- NA
+path_data[path_data$Has_Tau_Quant_3HippRegions == 1, "threads_hippocampus"] <- rowMeans(path_data[path_data$Has_Tau_Quant_3HippRegions == 1, hipp_combined_threads], na.rm = TRUE)
+
+# Export path data of interest
+write.csv(path_data, "/Users/amandadenning/Box/Collaborations/JeffPhillips_TauPET_Histo/PathData/ROI_level_path_data.csv", na = "", row.names = FALSE)
+# Isolate to ERC, Hippocampus, and Amgydala 
+mtl_path <- path_data[, c("AutopsyID", "tangles_Amy", "tangles_aERC", "tangles_hippocampus", "threads_Amy", "threads_aERC", "threads_hippocampus")]
+write.csv(mtl_path, "/Users/amandadenning/Box/Collaborations/JeffPhillips_TauPET_Histo/PathData/MTL_path_data.csv", na = "", row.names = FALSE)
+
+rm(patches)
+```
+
+```{r CNDR Data}
+# Get inquery data
+inquery <- read_xlsx('/Users/amandadenning/Library/CloudStorage/Box-Box/Collaborations/JeffPhillips_TauPET_Histo/PathData/INQuery Output (2026.10.08 16.49).xlsx') %>% process_indd_SQ() %>% stage_LATE() %>% define_AD_continuum()
+inquery$Braak03 <- NA # for staging spreadsheet to work
+inquery <- inquery %>% stage_ADNC()
+
+# Drop LATE staging for anything with FTLD-TDP43
+inquery <- inquery %>%
+  dplyr::mutate(LATE_Stage = if_else(if_any(all_of(c("NPDx1", "NPDx2", "NPDx3", "NPDx4", "NPDx5", "NPDxOther")), ~ .x %in% "Frontotemporal lobar degeneration with TDP inclusions (Also known as FTLD-TDP)"), NA, LATE_Stage))
+
+# Merge
+autopsy_data <- left_join(mtl_path, inquery, by = "AutopsyID")
+rm(inquery)
+
+# Calculate average MTL rating from CNDR 
+autopsy_data$Hipp_SQ_Avg <- rowMeans(autopsy_data[, c("CSTau", "DGTau")], na.rm = TRUE)
+
+# Merge in diagnostic hemi
+diagnostic <- read_xlsx("/Users/amandadenning/Library/CloudStorage/Box-Box/Collaborations/JeffPhillips_TauPET_Histo/Statistics/INQuery Output (2026.10.12 15.33).xlsx")
+
+autopsy_data <- left_join(autopsy_data, diagnostic, by = "INDDID")
+
+# Identify non-AD tauopathies
+non_ad_tauopathies <- c("Progressive supranuclear palsy", "Globular glial tauopathy", "Corticobasal degeneration", "Tauopathy unclassifiable","Pick's disease", "Argyrophilic grain disease", "Chronic Traumatic Encephalopathy")
+autopsy_data <- autopsy_data %>%
+  dplyr::mutate(Non_AD_Tauopathy = if_else(if_any(all_of(c("NPDx1", "NPDx2", "NPDx3", "NPDx4", "NPDx5", "NPDxOther")), ~ .x %in% non_ad_tauopathies), 1,0))
+
+autopsy_data$INDDID <- as.character(autopsy_data$INDDID)
+
+# Add in clinical data
+clinical <- read_xlsx("/Users/amandadenning/Library/CloudStorage/Box-Box/Collaborations/JeffPhillips_TauPET_Histo/Statistics/pmTau_Diagnoses.xlsx") %>% as.data.frame()
+clinical$INDDID <- as.character(clinical$INDDID)
+clinical[clinical$Diagnosis %in% c("bvFTD", "bvFTD;"), "Diagnosis"] <- "bvFTD"
+
+autopsy_data <- left_join(autopsy_data, clinical, by = "INDDID")
+rm(clinical)
+
+```
+
+
+```{r Set up old PET}
+old_pet <- read.csv("/Users/amandadenning/Library/CloudStorage/Box-Box/Collaborations/JeffPhillips_TauPET_Histo/PET/pet_old_both_hemi.csv")
+old_pet$INDDID <- as.character(old_pet$INDDID)
+
+# Define a function to process the PET data for each person and return their PET data in wide format
+process_pet_old <- function(INDDID, pet_df, diagnostic_hemi){
+  pt_df <- pet_df[pet_df$INDDID == INDDID, ]
+  # Get scan date
+  date_list <- unique(pt_df$PET)
+  processed_dates <- as.Date(character(0))
+  for (date in date_list){
+    #print(date)
+    raw_date <- date
+    if(grepl(INDDID, date)){
+      date <- gsub(paste0(INDDID, "x"), "", date)
+      date <- gsub("xAV1451PETxABC", "", date)
+    } else {
+      date <- str_split(date, "x")[[1]][1]
+    }
+    date <- as.Date(date, format = "%Y%m%d")
+    processed_dates <- c(processed_dates, date)
+    pt_df[pt_df$PET == raw_date, "PET_Scan_Date"] <- date
+  }
+  # Get last scan date and correct hemisphere that matches path
+  pt_df <- pt_df[pt_df$PET_Scan_Date == max(processed_dates) & pt_df$Hemisphere == diagnostic_hemi, ]
+  pt_df_wide <- pivot_wider(pt_df, names_from = "Name", values_from = "SUVR", id_cols = c("INDDID", "PET", "Hemisphere", "PET_Scan_Date"))
+  pt_df_wide$HippocampusAvg <- rowMeans(pt_df_wide[, c("Anterior_hippocampus", "Posterior_hippocampus")])
+  # Return
+  return(pt_df_wide)
+}
+
+old_pet_processed <- data.frame()
+old_pet_processed_contralateral <- data.frame()
+autopsy_data$INDDID <- as.character(autopsy_data$INDDID)
+for (INDDID in autopsy_data$INDDID){
+  if (INDDID %in% old_pet$INDDID){
+    # Ipsilateral
+    hemi <- autopsy_data[autopsy_data$INDDID == INDDID, "DiagnosticHemisphere"] %>% as.character()
+    pt_pet <- process_pet_old(INDDID = INDDID, pet_df = old_pet, diagnostic_hemi = hemi)
+    old_pet_processed <- rbind(old_pet_processed, pt_pet)
+    
+    # Contralateral
+    if (hemi == "Right"){contralateral <- "Left"}
+    else {contralateral <- "Right"}
+    old_pet_processed_contralateral <- rbind(old_pet_processed_contralateral, process_pet_old(INDDID = INDDID, pet_df = old_pet, diagnostic_hemi = contralateral))
+  }
+}
+
+# Drop bad PET from Jeff
+old_pet_processed <- old_pet_processed[!(old_pet_processed$INDDID %in% c("104190", "117630", "121277", "109300", "121433")), ]
+old_pet_processed_contralateral <- old_pet_processed_contralateral[!(old_pet_processed_contralateral$INDDID %in% c("104190", "117630", "121277", "109300", "121433")), ]
+
+# Add SUVR so its clearly pet
+colnames(old_pet_processed)[5:ncol(old_pet_processed)] <- paste0(colnames(old_pet_processed)[5:ncol(old_pet_processed)], "_SUVR")
+colnames(old_pet_processed)[colnames(old_pet_processed) == "Hemisphere"] <- "PET_Hemisphere"
+colnames(old_pet_processed)[colnames(old_pet_processed) == "ERC_BA35_SUVR"] <- "ERCBA35_SUVR" 
+
+colnames(old_pet_processed_contralateral)[5:ncol(old_pet_processed_contralateral)] <- paste0(colnames(old_pet_processed_contralateral)[5:ncol(old_pet_processed_contralateral)], "_SUVR")
+colnames(old_pet_processed_contralateral)[colnames(old_pet_processed_contralateral) == "Hemisphere"] <- "PET_Hemisphere"
+colnames(old_pet_processed_contralateral)[colnames(old_pet_processed_contralateral) == "ERC_BA35_SUVR"] <- "ERCBA35_SUVR"
+
+# Merge
+path_oldpet <- left_join(autopsy_data, old_pet_processed, by = c("INDDID"))
+path_oldpet_contra <- left_join(autopsy_data, old_pet_processed_contralateral, by = c("INDDID"))
+
+# Age at scan 
+path_oldpet$AgeAtScan <- difftime(path_oldpet$PET_Scan_Date, path_oldpet$DOB, units = "days") / 365.25
+path_oldpet$AgeAtScan  <- as.numeric(path_oldpet$AgeAtScan)
+
+path_oldpet_contra$AgeAtScan <- difftime(path_oldpet_contra$PET_Scan_Date, path_oldpet_contra$DOB, units = "days") / 365.25
+path_oldpet_contra$AgeAtScan  <- as.numeric(path_oldpet_contra$AgeAtScan)
+
+# Antemortem Interval
+path_oldpet$Antemortem_Interval_y <- difftime(path_oldpet$DOD, path_oldpet$PET_Scan_Date, units = "days") / 365.25
+path_oldpet$Antemortem_Interval_y <- as.numeric(path_oldpet$Antemortem_Interval_y)
+
+path_oldpet_contra$Antemortem_Interval_y <- difftime(path_oldpet_contra$DOD, path_oldpet_contra$PET_Scan_Date, units = "days") / 365.25
+path_oldpet_contra$Antemortem_Interval_y <- as.numeric(path_oldpet_contra$Antemortem_Interval_y)
+
+
+```
+
+
+```{r Eligibility}
+# Ipsilateral 
+
+# Eligibility based on having same region pathology and PET
+path_oldpet$Amyg_Eligible_Q <- !is.na(path_oldpet$tangles_Amy) & !is.na(path_oldpet$Amygdala_SUVR)
+path_oldpet$Amyg_Eligible_SQ <- !is.na(path_oldpet$AmygTau) & !is.na(path_oldpet$Amygdala_SUVR)
+
+path_oldpet$Hipp_Eligible_Q <- !is.na(path_oldpet$tangles_hippocampus) & !is.na(path_oldpet$HippocampusAvg_SUVR)
+path_oldpet$Hipp_Eligible_SQ <- !is.na(path_oldpet$Hipp_SQ_Avg) & !is.na(path_oldpet$HippocampusAvg_SUVR)
+
+path_oldpet$ERC_Eligible_Q <- !is.na(path_oldpet$tangles_aERC) & !is.na(path_oldpet$ERCBA35_SUVR) 
+path_oldpet$ERC_Eligible_SQ <- !is.na(path_oldpet$ECTau) & !is.na(path_oldpet$ERCBA35_SUVR) 
+
+# Eligibility based on not being non-AD tauopathy (and has a diagnosis to exlcude the case that hasn't been diagnosed yet) and has PET
+ad_path_oldpet <- path_oldpet[path_oldpet$Non_AD_Tauopathy == 0 & !is.na(path_oldpet$NPDx1) & !is.na(path_oldpet$PET_Scan_Date), ]
+
+cat(sprintf("\n Number of cases eligible for any quantitative comparisons with old PET and no non-AD tauopathies: %.0f", sum(ad_path_oldpet$Amyg_Eligible_Q | ad_path_oldpet$ERC_Eligible_Q | ad_path_oldpet$Hipp_Eligible_Q)))
+
+# Eligiblity for Braak06 
+early_braak_oldpet <- ad_path_oldpet[ad_path_oldpet$B_Score < 3, ]
+cat(sprintf("\n Number of cases eligible for any quantitative comparisons with old PET and no non-AD tauopathies and Braak 0-IV: %.0f", sum(early_braak_oldpet$Amyg_Eligible_Q | early_braak_oldpet$ERC_Eligible_Q | early_braak_oldpet$Hipp_Eligible_Q)))
+
+# Contralateral 
+
+# Eligibility based on having same region pathology and PET
+path_oldpet_contra$Amyg_Eligible_Q <- !is.na(path_oldpet_contra$tangles_Amy) & !is.na(path_oldpet_contra$Amygdala_SUVR)
+path_oldpet_contra$Amyg_Eligible_SQ <- !is.na(path_oldpet_contra$AmygTau) & !is.na(path_oldpet_contra$Amygdala_SUVR)
+
+path_oldpet_contra$Hipp_Eligible_Q <- !is.na(path_oldpet_contra$tangles_hippocampus) & !is.na(path_oldpet_contra$HippocampusAvg_SUVR)
+path_oldpet_contra$Hipp_Eligible_SQ <- !is.na(path_oldpet_contra$Hipp_SQ_Avg) & !is.na(path_oldpet_contra$HippocampusAvg_SUVR)
+
+path_oldpet_contra$ERC_Eligible_Q <- !is.na(path_oldpet_contra$tangles_aERC) & !is.na(path_oldpet_contra$ERCBA35_SUVR) 
+path_oldpet_contra$ERC_Eligible_SQ <- !is.na(path_oldpet_contra$ECTau) & !is.na(path_oldpet_contra$ERCBA35_SUVR) 
+
+# Eligibility based on not being non-AD tauopathy (and has a diagnosis to exlcude the case that hasn't been diagnosed yet) and has PET
+ad_path_oldpet_contra <- path_oldpet_contra[path_oldpet_contra$Non_AD_Tauopathy == 0 & !is.na(path_oldpet_contra$NPDx1) & !is.na(path_oldpet_contra$PET_Scan_Date), ]
+
+cat(sprintf("\n Number of cases eligible for any quantitative comparisons with old PET and no non-AD tauopathies: %.0f", sum(ad_path_oldpet_contra$Amyg_Eligible_Q | ad_path_oldpet_contra$ERC_Eligible_Q | ad_path_oldpet_contra$Hipp_Eligible_Q)))
+
+# Eligiblity for Braak06 
+early_braak_oldpet <- ad_path_oldpet_contra[ad_path_oldpet_contra$B_Score < 3, ]
+cat(sprintf("\n Number of cases eligible for any quantitative comparisons with old PET and no non-AD tauopathies and Braak 0-IV: %.0f", sum(early_braak_oldpet$Amyg_Eligible_Q | early_braak_oldpet$ERC_Eligible_Q | early_braak_oldpet$Hipp_Eligible_Q)))
+
+```
+```{r Spearman Correlations Ipsilateral}
+# Run Spearman Correlations
+cor_amyg_tangles <- cor.test(ad_path_oldpet$Amygdala_SUVR, ad_path_oldpet$tangles_Amy, method = "spearman")
+cor_amyg_threads <- cor.test(ad_path_oldpet$Amygdala_SUVR, ad_path_oldpet$threads_Amy, method = "spearman")
+cor_amyg_SQ <- cor.test(ad_path_oldpet$Amygdala_SUVR, ad_path_oldpet$AmygTau, method = "spearman")
+
+cor_erc_tangles <- cor.test(ad_path_oldpet$ERCBA35_SUVR, ad_path_oldpet$tangles_aERC, method = "spearman")
+cor_erc_threads <- cor.test(ad_path_oldpet$ERCBA35_SUVR, ad_path_oldpet$threads_aERC, method = "spearman")
+cor_erc_sq <- cor.test(ad_path_oldpet$ERCBA35_SUVR, ad_path_oldpet$ECTau, method = "spearman")
+
+cor_hipp_tangles <- cor.test(ad_path_oldpet$HippocampusAvg_SUVR, ad_path_oldpet$tangles_hippocampus, method = "spearman")
+cor_hipp_threads <- cor.test(ad_path_oldpet$HippocampusAvg_SUVR, ad_path_oldpet$threads_hippocampus, method = "spearman")
+cor_hipp_sq <- cor.test(ad_path_oldpet$HippocampusAvg_SUVR, ad_path_oldpet$Hipp_SQ_Avg, method = "spearman")
+
+# Run Spearman Correlations in Braak1-4
+cor_amyg_tangles_lowBraak <- cor.test(early_braak_oldpet$Amygdala_SUVR, early_braak_oldpet$tangles_Amy, method = "spearman")
+cor_amyg_threads_lowBraak <- cor.test(early_braak_oldpet$Amygdala_SUVR, early_braak_oldpet$threads_Amy, method = "spearman")
+cor_amyg_sq_lowBraak <- cor.test(early_braak_oldpet$Amygdala_SUVR, early_braak_oldpet$AmygTau, method = "spearman")
+
+cor_erc_tangles_lowBraak <- cor.test(early_braak_oldpet$ERCBA35_SUVR, early_braak_oldpet$tangles_aERC, method = "spearman")
+cor_erc_threads_lowBraak <- cor.test(early_braak_oldpet$ERCBA35_SUVR, early_braak_oldpet$threads_aERC, method = "spearman")
+cor_erc_sq_lowBraak <- cor.test(early_braak_oldpet$ERCBA35_SUVR, early_braak_oldpet$ECTau, method = "spearman")
+
+cor_hipp_tangles_lowBraak <- cor.test(early_braak_oldpet$HippocampusAvg_SUVR, early_braak_oldpet$tangles_hippocampus, method = "spearman")
+cor_hipp_threads_lowBraak <- cor.test(early_braak_oldpet$HippocampusAvg_SUVR, early_braak_oldpet$threads_hippocampus, method = "spearman")
+cor_hipp_sq_lowBraak <- cor.test(early_braak_oldpet$HippocampusAvg_SUVR, early_braak_oldpet$ECTau, method = "spearman")
+
+# Hitner's Z: Compare between path types, hypothesis that tangles is stronger
+#cocor(~Amygdala_SUVR + tangles_Amy | Amygdala_SUVR + threads_Amy, as.data.frame(ad_path_oldpet), test = "hittner2003")
+#cocor(~ERCBA35_SUVR + tangles_aERC | ERCBA35_SUVR + threads_aERC, as.data.frame(ad_path_oldpet), test = "hittner2003")
+#cocor(~HippocampusAvg_SUVR + tangles_hippocampus | HippocampusAvg_SUVR + threads_hippocampus, as.data.frame(ad_path_oldpet), test = "hittner2003")
+
+# Hitner's Z: Compare Q/QC, hypothesis that quant is stronger
+# cocor(~Amygdala_SUVR + tangles_Amy | Amygdala_SUVR + AmygTau, as.data.frame(ad_path_oldpet), test = "hittner2003")
+# #cocor(~ERCBA35_SUVR + tangles_aERC | ERCBA35_SUVR + ECTau, as.data.frame(ad_path_oldpet), test = "hittner2003")
+# cocor(~HippocampusAvg_SUVR + tangles_hippocampus | HippocampusAvg_SUVR + Hipp_SQ_Avg, as.data.frame(ad_path_oldpet), test = "hittner2003")
+```
+
+
+```{r Partial Correlations Ipsilateral}
+library(ppcor)
+region_matrix <- matrix(c("Hipp", "Amyg", "ERC", "HippocampusAvg_SUVR", "Amygdala_SUVR", "ERCBA35_SUVR", "tangles_hippocampus", "tangles_Amy", "tangles_aERC", "threads_hippocampus", "threads_Amy", "threads_aERC", "Hipp_SQ_Avg", "AmygTau", "ECTau"), nrow = 3) %>% as.data.frame()
+colnames(region_matrix) <- c("Region", "PET", "Tangles", "Threads", "SQ")
+rownames(region_matrix) <- region_matrix$Region
+
+# Write a function that will run the correlation for one pair of path and regions
+run_pcor_single <- function(df, region, path, covary=FALSE){
+  # Filter out data that is not eligible
+  if (path == "SQ"){
+    df <- df[df[[paste0(region, "_Eligible_SQ")]] %in% TRUE, ]
+  } else if (path %in% c("Tangles", "Threads")){
+    df <- df[df[[paste0(region, "_Eligible_Q")]] %in% TRUE, ]
+  }
+  # Get variables
+  pet_variable <- region_matrix[region, "PET"]
+  path_variable <- region_matrix[region, path]
+  
+  # Run correlation
+  if (covary == TRUE){
+    # Partial correlation
+    my_cor <- pcor(df[, c(pet_variable, path_variable, "Antemortem_Interval_y")], method = "spearman")
+    rho <- my_cor$estimate[pet_variable, path_variable]
+    p_value <- my_cor$p.value[pet_variable, path_variable]
+  } else {
+    my_cor <- pcor(df[, c(pet_variable, path_variable)], method = "spearman")
+    rho <- my_cor$estimate[pet_variable, path_variable]
+    p_value <- my_cor$p.value[pet_variable, path_variable]
+  }
+  
+  # Output
+  return(list("rho" = rho, "p_value" = p_value, "N" = nrow(df)))
+}
+
+# Write a function to run this for each correlation
+run_all_cors <- function(df, covary = FALSE){
+  rho_df <- matrix(NA, nrow = 3, ncol = 3) %>% as.data.frame()
+  colnames(rho_df) <- c("Tangles", "Threads", "SQ")
+  rownames(rho_df) <- c("Hipp", "Amyg", "ERC")
+  pval_df <- rho_df
+  n_df <- rho_df
+  
+  cor_df_vis <- rho_df
+  
+  for(region in rownames(rho_df)){
+    for (path in colnames(rho_df)){
+      my_cor <- run_pcor_single(df = df, region = region, path = path, covary = covary)
+      rho_df[region, path] <- my_cor$rho  
+      pval_df[region, path] <- my_cor$p_value
+      n_df <- my_cor$N
+      if(my_cor$p_value < 0.001){p_star <- sprintf("p < 0.001")} else {p_star <- sprintf("p = %0.3f", my_cor$p_value)}
+      
+      cor_df_vis[region, path] <- sprintf("ρ = %0.2f, %s, N = %d", my_cor$rho, p_star, my_cor$N)
+    }
+  }
+  
+  return(list("rho" = rho_df, "p_val" = pval_df, "cor_vis" = cor_df_vis))
+}
+
+ad_oldpet_cors <- run_all_cors(df = ad_path_oldpet)
+ad_oldpet_covary_AMI_cors <- run_all_cors(df = ad_path_oldpet, covary = TRUE)             
+                     
+
+pcor(ad_path_oldpet[ad_path_oldpet$Hipp_Eligible_Q == TRUE, c("HippocampusAvg_SUVR", "tangles_hippocampus", "Antemortem_Interval_y")], method = "spearman")
+
+pcor(early_braak_oldpet[early_braak_oldpet$Hipp_Eligible_Q == TRUE, c("HippocampusAvg_SUVR", "tangles_hippocampus", "Antemortem_Interval_y")], method = "spearman")
+
+
+
+# Run Spearman Correlations
+cor_amyg_tangles <- cor.test(ad_path_oldpet$Amygdala_SUVR, ad_path_oldpet$tangles_Amy, method = "spearman")
+cor_amyg_threads <- cor.test(ad_path_oldpet$Amygdala_SUVR, ad_path_oldpet$threads_Amy, method = "spearman")
+cor_amyg_SQ <- cor.test(ad_path_oldpet$Amygdala_SUVR, ad_path_oldpet$AmygTau, method = "spearman")
+
+cor_erc_tangles <- cor.test(ad_path_oldpet$ERCBA35_SUVR, ad_path_oldpet$tangles_aERC, method = "spearman")
+cor_erc_threads <- cor.test(ad_path_oldpet$ERCBA35_SUVR, ad_path_oldpet$threads_aERC, method = "spearman")
+cor_erc_sq <- cor.test(ad_path_oldpet$ERCBA35_SUVR, ad_path_oldpet$ECTau, method = "spearman")
+
+cor_hipp_tangles <- cor.test(ad_path_oldpet$HippocampusAvg_SUVR, ad_path_oldpet$tangles_hippocampus, method = "spearman")
+cor_hipp_threads <- cor.test(ad_path_oldpet$HippocampusAvg_SUVR, ad_path_oldpet$threads_hippocampus, method = "spearman")
+cor_hipp_sq <- cor.test(ad_path_oldpet$HippocampusAvg_SUVR, ad_path_oldpet$Hipp_SQ_Avg, method = "spearman")
+
+# Run Spearman Correlations in Braak1-4
+cor_amyg_tangles_lowBraak <- cor.test(early_braak_oldpet$Amygdala_SUVR, early_braak_oldpet$tangles_Amy, method = "spearman")
+cor_amyg_threads_lowBraak <- cor.test(early_braak_oldpet$Amygdala_SUVR, early_braak_oldpet$threads_Amy, method = "spearman")
+cor_amyg_sq_lowBraak <- cor.test(early_braak_oldpet$Amygdala_SUVR, early_braak_oldpet$AmygTau, method = "spearman")
+
+cor_erc_tangles_lowBraak <- cor.test(early_braak_oldpet$ERCBA35_SUVR, early_braak_oldpet$tangles_aERC, method = "spearman")
+cor_erc_threads_lowBraak <- cor.test(early_braak_oldpet$ERCBA35_SUVR, early_braak_oldpet$threads_aERC, method = "spearman")
+cor_erc_sq_lowBraak <- cor.test(early_braak_oldpet$ERCBA35_SUVR, early_braak_oldpet$ECTau, method = "spearman")
+
+cor_hipp_tangles_lowBraak <- cor.test(early_braak_oldpet$HippocampusAvg_SUVR, early_braak_oldpet$tangles_hippocampus, method = "spearman")
+cor_hipp_threads_lowBraak <- cor.test(early_braak_oldpet$HippocampusAvg_SUVR, early_braak_oldpet$threads_hippocampus, method = "spearman")
+cor_hipp_sq_lowBraak <- cor.test(early_braak_oldpet$HippocampusAvg_SUVR, early_braak_oldpet$ECTau, method = "spearman")
+
+
+cor.test(ad_path_oldpet$HippocampusAvg_SUVR, ad_path_oldpet$tangles_hippocampus, method = "spearman")
+
+```
+
+```{r Plot Ipsilateral}
+
+# --- Plot ---
+# Pivot PET data
+oldpet_long <- pivot_longer(old_pet_processed[, c("INDDID", "Amygdala_SUVR", "ERCBA35_SUVR", "HippocampusAvg_SUVR")], cols = -INDDID, names_to = c("region", "path_type"), 
+                         names_sep = "_", 
+                         values_to = "PET_SUVR")
+oldpet_long <- oldpet_long[, c("INDDID", "region", "PET_SUVR")]
+# Pivot quantitative pathology data
+path_long <- pivot_longer(autopsy_data[, c("INDDID", "tangles_Amy", "threads_Amy", "tangles_hippocampus", "threads_hippocampus", "tangles_aERC", "threads_aERC")], cols = -INDDID, names_to = c("path_type", "region"), 
+                         names_sep = "_", 
+                         values_to = "Neuropath")
+path_long <- path_long[, c("INDDID", "region", "path_type", "Neuropath")]
+path_long$region <- mapvalues(path_long$region, c("Amy", "hippocampus", "aERC"), c("Amygdala", "HippocampusAvg", "ERCBA35"))
+# Pivot SQ pathology data
+sq_long <- pivot_longer(autopsy_data[, c("INDDID", "AmygTau", "ECTau", "Hipp_SQ_Avg")], cols = -INDDID, names_to = "region", values_to = "SemiQuantitative")
+sq_long$region <- mapvalues(sq_long$region, c("AmygTau", "ECTau", "Hipp_SQ_Avg"), c("Amygdala", "ERCBA35", "HippocampusAvg"))
+
+# Merge                            
+path_oldpet_long <- left_join(oldpet_long, path_long, by = c("INDDID", "region")) 
+sq_oldpet_long <- left_join(oldpet_long, sq_long, by = c("INDDID", "region")) 
+
+path_oldpet_long <- path_oldpet_long[!is.na(path_oldpet_long$Neuropath), ] 
+sq_oldpet_long <- sq_oldpet_long[!is.na(sq_oldpet_long$SemiQuantitative), ]
+
+path_oldpet_long <- left_join(path_oldpet_long, autopsy_data[, c("INDDID", "AutopsyID", "ABeta", "Braak06", "CERAD", "ADNC", "IsADContinuum", "NPDx1", "NPDx2", "NPDx3", "NPDx4", "NPDx5", "NPDxOther", "B_Score")], by = "INDDID")
+sq_oldpet_long <- left_join(sq_oldpet_long, autopsy_data[, c("INDDID", "AutopsyID", "ABeta", "Braak06", "CERAD", "ADNC", "IsADContinuum", "NPDx1", "NPDx2", "NPDx3", "NPDx4", "NPDx5", "NPDxOther", "B_Score")], by = "INDDID")
+
+path_oldpet_long$B_Score_Chrt <- as.character(path_oldpet_long$B_Score)
+sq_oldpet_long$B_Score_Chrt <- as.character(sq_oldpet_long$B_Score)
+
+# Take people who are eligible: 
+path_oldpet_long$Eligible_AD <- path_oldpet_long$INDDID %in% ad_path_oldpet$INDDID
+sq_oldpet_long$Eligible_AD <- sq_oldpet_long$INDDID %in% ad_path_oldpet$INDDID
+
+# Plot tangles
+ggplot(path_oldpet_long[path_oldpet_long$path_type %in% "tangles" & path_oldpet_long$Eligible_AD == TRUE, ], aes(x = Neuropath, y = PET_SUVR)) + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  geom_point(aes(color = B_Score_Chrt), size = 3) + 
+  amanda_theme + 
+  labs(x = "Postmortem Tangles Measurement", y = "SUVR", color = "Braak Stage", title = "Tangle Pathology") + 
+  scale_color_manual(
+  values = c("0" = "#ffdd00",     
+             "1" = "#f79374",   
+             "2" = "#ff4238",   
+             "3" = "#5e0822"), 
+  labels = c("0" = "0", 
+             "1" = "I-II", 
+             "2" = "III-IV", 
+             "3" = "V-VI"
+    )) + 
+  theme(strip.text = element_text(size = 16))
+ggsave("/Users/amandadenning/Box/Abstracts/HAI_2027/tangles_plot.png", width = 13, height = 4)
+
+# Plot Threads
+ggplot(path_oldpet_long[path_oldpet_long$path_type %in% "threads" & path_oldpet_long$Eligible_AD == TRUE, ], aes(x = Neuropath, y = PET_SUVR)) + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  geom_point(aes(color = B_Score_Chrt), size =3) + 
+  amanda_theme + 
+  labs(x = "Postmortem Threads Measurement", y = "SUVR", color = "Braak Stage", title = "Thread Pathology") + 
+  scale_color_manual(
+  values = c("0" = "#ffdd00",     
+             "1" = "#f79374",   
+             "2" = "#ff4238",   
+             "3" = "#5e0822"), 
+  labels = c("0" = "0", 
+             "1" = "I-II", 
+             "2" = "III-IV", 
+             "3" = "V-VI"
+    )) + 
+  theme(strip.text = element_text(size = 16))
+ggsave("/Users/amandadenning/Box/Abstracts/HAI_2027/threads_plot.png", width = 13, height = 4)
+
+
+# Plot SQ
+ggplot(sq_oldpet_long[sq_oldpet_long$Eligible_AD == TRUE, ], aes(x = SemiQuantitative, y = PET_SUVR)) + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  geom_point(aes(color = B_Score_Chrt), size =3) + 
+  amanda_theme + 
+  labs(x = "Postmortem Semi-Quantitative Tau Measurement", y = "SUVR", color = "Braak Stage", title = "Semi-Quantitative Pathology Measurement") + 
+  scale_color_manual(
+  values = c("0" = "#ffdd00",     
+             "1" = "#f79374",   
+             "2" = "#ff4238",   
+             "3" = "#5e0822"), 
+  labels = c("0" = "0", 
+             "1" = "I-II", 
+             "2" = "III-IV", 
+             "3" = "V-VI"
+    )) + 
+  theme(strip.text = element_text(size = 16))
+ggsave("/Users/amandadenning/Box/Abstracts/HAI_2027/SQ_plot.png", width = 13, height = 4)
+
+
+```
+
+```{r Plot Contralateral}
+
+# --- Plot ---
+# Pivot PET data
+oldpet_contralateral_long <- pivot_longer(old_pet_processed_contralateral[, c("INDDID", "Amygdala_SUVR", "ERCBA35_SUVR", "HippocampusAvg_SUVR")], cols = -INDDID, names_to = c("region", "path_type"), 
+                         names_sep = "_", 
+                         values_to = "PET_SUVR")
+oldpet_contralateral_long <- oldpet_contralateral_long[, c("INDDID", "region", "PET_SUVR")]
+
+# Merge                            
+path_oldpet_contralateral_long <- left_join(oldpet_contralateral_long, path_long, by = c("INDDID", "region")) 
+sq_oldpet_contralateral_long <- left_join(oldpet_contralateral_long, sq_long, by = c("INDDID", "region")) 
+
+path_oldpet_contralateral_long <- path_oldpet_contralateral_long[!is.na(path_oldpet_contralateral_long$Neuropath), ] 
+sq_oldpet_contralateral_long <- sq_oldpet_contralateral_long[!is.na(sq_oldpet_contralateral_long$SemiQuantitative), ]
+
+path_oldpet_contralateral_long <- left_join(path_oldpet_contralateral_long, autopsy_data[, c("INDDID", "AutopsyID", "ABeta", "Braak06", "CERAD", "ADNC", "IsADContinuum", "NPDx1", "NPDx2", "NPDx3", "NPDx4", "NPDx5", "NPDxOther", "B_Score")], by = "INDDID")
+sq_oldpet_contralateral_long <- left_join(sq_oldpet_contralateral_long, autopsy_data[, c("INDDID", "AutopsyID", "ABeta", "Braak06", "CERAD", "ADNC", "IsADContinuum", "NPDx1", "NPDx2", "NPDx3", "NPDx4", "NPDx5", "NPDxOther", "B_Score")], by = "INDDID")
+
+path_oldpet_contralateral_long$B_Score_Chrt <- as.character(path_oldpet_contralateral_long$B_Score)
+sq_oldpet_contralateral_long$B_Score_Chrt <- as.character(sq_oldpet_contralateral_long$B_Score)
+
+# Take people who are eligible: 
+path_oldpet_contralateral_long$Eligible_AD <- path_oldpet_contralateral_long$INDDID %in% ad_path_oldpet$INDDID
+sq_oldpet_contralateral_long$Eligible_AD <- sq_oldpet_contralateral_long$INDDID %in% ad_path_oldpet$INDDID
+
+# Plot tangles
+ggplot(path_oldpet_contralateral_long[path_oldpet_contralateral_long$path_type %in% "tangles" & path_oldpet_contralateral_long$Eligible_AD == TRUE, ], aes(x = Neuropath, y = PET_SUVR)) + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  geom_point(aes(color = B_Score_Chrt), size = 3) + 
+  amanda_theme + 
+  labs(x = "Postmortem Tangles Measurement", y = "SUVR", color = "Braak Stage", title = "Contralateral Tangle Pathology") + 
+  scale_color_manual(
+  values = c("0" = "#ffdd00",     
+             "1" = "#f79374",   
+             "2" = "#ff4238",   
+             "3" = "#5e0822"), 
+  labels = c("0" = "0", 
+             "1" = "I-II", 
+             "2" = "III-IV", 
+             "3" = "V-VI"
+    )) + 
+  theme(strip.text = element_text(size = 16))
+ggsave("/Users/amandadenning/Box/Abstracts/HAI_2027/tangles_plot_contralateral.png", width = 13, height = 4)
+
+# Plot Threads
+ggplot(path_oldpet_contralateral_long[path_oldpet_contralateral_long$path_type %in% "threads" & path_oldpet_contralateral_long$Eligible_AD == TRUE, ], aes(x = Neuropath, y = PET_SUVR)) + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  geom_point(aes(color = B_Score_Chrt), size =3) + 
+  amanda_theme + 
+  labs(x = "Postmortem Threads Measurement", y = "SUVR", color = "Braak Stage", title = "Contralateral Thread Pathology") + 
+  scale_color_manual(
+  values = c("0" = "#ffdd00",     
+             "1" = "#f79374",   
+             "2" = "#ff4238",   
+             "3" = "#5e0822"), 
+  labels = c("0" = "0", 
+             "1" = "I-II", 
+             "2" = "III-IV", 
+             "3" = "V-VI"
+    )) + 
+  theme(strip.text = element_text(size = 16))
+ggsave("/Users/amandadenning/Box/Abstracts/HAI_2027/threads_plot.png", width = 13, height = 4)
+
+
+# Plot SQ
+ggplot(sq_oldpet_contralateral_long[sq_oldpet_contralateral_long$Eligible_AD == TRUE, ], aes(x = SemiQuantitative, y = PET_SUVR)) + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  geom_point(aes(color = B_Score_Chrt), size =3) + 
+  amanda_theme + 
+  labs(x = "Postmortem Semi-Quantitative Tau Measurement", y = "SUVR", color = "Braak Stage", title = "Contralateral Semi-Quantitative Pathology Measurement") + 
+  scale_color_manual(
+  values = c("0" = "#ffdd00",     
+             "1" = "#f79374",   
+             "2" = "#ff4238",   
+             "3" = "#5e0822"), 
+  labels = c("0" = "0", 
+             "1" = "I-II", 
+             "2" = "III-IV", 
+             "3" = "V-VI"
+    )) + 
+  theme(strip.text = element_text(size = 16))
+ggsave("/Users/amandadenning/Box/Abstracts/HAI_2027/SQ_plot_contralateral.png", width = 13, height = 4)
+
+
+```
+
+```{r Spearman Correlations Contralateral}
+# Run Spearman Correlations
+cor_amyg_tangles_contralateral <- cor.test(ad_path_oldpet_contra$Amygdala_SUVR, ad_path_oldpet_contra$tangles_Amy, method = "spearman")
+cor_amyg_threads_contralateral <- cor.test(ad_path_oldpet_contra$Amygdala_SUVR, ad_path_oldpet_contra$threads_Amy, method = "spearman")
+cor_amyg_SQ_contralateral <- cor.test(ad_path_oldpet_contra$Amygdala_SUVR, ad_path_oldpet_contra$AmygTau, method = "spearman")
+
+cor_erc_tangles_contralateral <- cor.test(ad_path_oldpet_contra$ERCBA35_SUVR, ad_path_oldpet_contra$tangles_aERC, method = "spearman")
+cor_erc_threads_contralateral <- cor.test(ad_path_oldpet_contra$ERCBA35_SUVR, ad_path_oldpet_contra$threads_aERC, method = "spearman")
+cor_erc_sq_contralateral <- cor.test(ad_path_oldpet_contra$ERCBA35_SUVR, ad_path_oldpet_contra$ECTau, method = "spearman")
+
+cor_hipp_tangles_contralateral <- cor.test(ad_path_oldpet_contra$HippocampusAvg_SUVR, ad_path_oldpet_contra$tangles_hippocampus, method = "spearman")
+cor_hipp_threads_contralateral <- cor.test(ad_path_oldpet_contra$HippocampusAvg_SUVR, ad_path_oldpet_contra$threads_hippocampus, method = "spearman")
+cor_hipp_sq_contralateral <- cor.test(ad_path_oldpet_contra$HippocampusAvg_SUVR, ad_path_oldpet_contra$Hipp_SQ_Avg, method = "spearman")
+
+# Run Spearman Correlations in Braak1-4
+cor_amyg_tangles_lowBraak_contralateral <- cor.test(early_braak_oldpet$Amygdala_SUVR, early_braak_oldpet$tangles_Amy, method = "spearman")
+cor_amyg_threads_lowBraak_contralateral <- cor.test(early_braak_oldpet$Amygdala_SUVR, early_braak_oldpet$threads_Amy, method = "spearman")
+cor_amyg_sq_lowBraak_contralateral <- cor.test(early_braak_oldpet$Amygdala_SUVR, early_braak_oldpet$AmygTau, method = "spearman")
+
+cor_erc_tangles_lowBraak_contralateral <- cor.test(early_braak_oldpet$ERCBA35_SUVR, early_braak_oldpet$tangles_aERC, method = "spearman")
+cor_erc_threads_lowBraak_contralateral <- cor.test(early_braak_oldpet$ERCBA35_SUVR, early_braak_oldpet$threads_aERC, method = "spearman")
+cor_erc_sq_lowBraak_contralateral <- cor.test(early_braak_oldpet$ERCBA35_SUVR, early_braak_oldpet$ECTau, method = "spearman")
+
+cor_hipp_tangles_lowBraak_contralateral <- cor.test(early_braak_oldpet$HippocampusAvg_SUVR, early_braak_oldpet$tangles_hippocampus, method = "spearman")
+cor_hipp_threads_lowBraak_contralateral <- cor.test(early_braak_oldpet$HippocampusAvg_SUVR, early_braak_oldpet$threads_hippocampus, method = "spearman")
+cor_hipp_sq_lowBraak_contralateral <- cor.test(early_braak_oldpet$HippocampusAvg_SUVR, early_braak_oldpet$ECTau, method = "spearman")
+```
+
+```{r Demographics}
+library(gt)
+# ---- Helper Functions ----
+mean_sd_range_age <- function(x) {
+  x <- x[!is.na(x)]
+  
+  sprintf(
+    "%.1f ± %.1f (%d–%d)",
+    mean(x),
+    sd(x),
+    floor(min(x)),
+    floor(max(x))
+  )
+}
+
+mean_sd_range_num <- function(x) {
+  x <- x[!is.na(x)]
+  sprintf(
+    "%.1f ± %.1f (%0.1f–%0.1f)",
+    mean(x),
+    sd(x),
+    min(x),
+    max(x)
+  )
+}
+
+
+mean_sd_range_integer <- function(x) {
+  x <- x[!is.na(x)]
+  sprintf(
+    "%.1f ± %.1f (%d–%d)",
+    mean(x),
+    sd(x),
+    min(x),
+    max(x)
+  )
+}
+
+n_pct <- function(x, level) {
+  total = length(x)
+  if (is.na(level)) {
+    n <- sum(is.na(x))
+  } else {
+    n <- sum(x == level, na.rm = TRUE)
+  }
+  sprintf("%d (%.1f%%)", n, 100 * n / total)
+}
+
+format_table <- function(table, N, header_rows){
+  table <- table %>% gt() %>%
+  tab_header(
+    title = "Participant Demographics"
+  ) %>%
+  cols_label(
+    Characteristic = "",
+    Value = sprintf("Total (N = %d)", N)
+  ) %>%
+  cols_align(align = "left", columns = Characteristic) %>%
+  cols_align(align = "center", columns = Value) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_body(rows = header_rows)
+  ) %>%
+  opt_all_caps(FALSE) %>%
+  opt_vertical_padding(scale = 0.8) %>%
+  tab_source_note(
+    source_note = "Values are mean ± SD (range) or n (%)."
+  ) %>%
+  tab_options(
+    table.border.top.style = "solid",
+    table.border.top.width = px(2),
+    table.border.bottom.style = "solid",
+    table.border.bottom.width = px(2),
+    column_labels.border.bottom.style = "solid",
+    column_labels.border.bottom.width = px(1),
+    table_body.border.bottom.style = "none",
+    table_body.hlines.style = "none",
+    table_body.vlines.style = "none", 
+    table.width = pct(50),
+  )
+  return(table)
+}
+
+make_demographics_table_INDD <- function(my_df){
+  N <- nrow(my_df) 
+  age_row <- tibble(Characteristic = "Age at Death", 
+                    Value = mean_sd_range_age(my_df$AgeatDeath))
+  gender_row <- tibble(Characteristic = "Sex", 
+                       Value = sprintf(
+                         "%s F / %s M", 
+                         n_pct(my_df$Sex, "Female"), 
+                         n_pct(my_df$Sex, "Male")
+                       ))
+  edu_row <- tibble(Characteristic = "Education (years)", 
+                    Value = mean_sd_range_integer(my_df$Education))
+  # race_levels <- c("White", "Black or African American", "Asian", "More than One Race", NA)
+  # race_labels <- c("White", "Black or African American", "Asian", "More than One Race", "Missing")
+  # race_rows <- map2_dfr(
+  #   race_levels, 
+  #   race_labels, 
+  #   ~ tibble(
+  #     Characteristic = paste0(" ", .y), 
+  #     Value = n_pct(my_df$Race, .x)
+  #   )
+  # )
+  # race_header <- tibble(
+  #   Characteristic = "Race",
+  #   Value = ""
+  # )
+  # race_block <- bind_rows(race_header, race_rows)
+  
+  # Clinical diagnosis blocks
+  clinical_dx_header <- tibble(
+    Characteristic = "Clinical Diagnosis",
+    Value = ""
+  )
+  cdx_values <- sort(unique(as.character(my_df$Diagnosis)))
+  cdx_values <- cdx_values[!is.na(cdx_values)]
+  
+  cdx_rows <- tibble(
+    Characteristic = paste0(" ", cdx_values),
+    Value = vapply(cdx_values, function(v) n_pct(as.character(my_df$Diagnosis), v),
+                   character(1), USE.NAMES = FALSE)
+  )
+  cdx_block <- rbind(clinical_dx_header, cdx_rows)
+  
+  # ADNC block
+  adnc_header <- tibble(
+    Characteristic = "ADNC", 
+    Value = "")
+  adnc_levels <- c("Not", "Low", "Intermediate", "High")
+  adnc_rows <- map2_dfr(
+    adnc_levels,
+    adnc_levels,
+    ~ tibble(
+      Characteristic = paste0(" ", .y), 
+      Value = n_pct(my_df$ADNC, .x)
+    )
+  )
+  
+  adnc_block <- rbind(adnc_header, adnc_rows)
+  
+  # Imaging blocks
+  imaging_header <- tibble(
+    Characteristic = "[18]*F-Flortaucipir  Imaging",
+    Value = ""
+  )
+  age_at_scan_row <- tibble(Characteristic = "Age at Tau PET Scan",
+                  Value = mean_sd_range_age(my_df$AgeAtScan))
+  ami_row <- tibble(
+    Characteristic = "Antemortem Interval (years)",
+    Value = mean_sd_range_num(my_df$Antemortem_Interval_y)
+  )
+  # pmi_row <- tibble(
+  #   Characteristic = "Postmortem Interval (hours)",
+  #   Value = mean_sd_range_num(my_df$PMI)
+  # )
+  imaging_block <- bind_rows(imaging_header, age_at_scan_row, ami_row)
+
+  
+  table1 <- bind_rows(
+  age_row,
+  gender_row,
+  edu_row,
+  # race_block,
+  adnc_block,
+  cdx_block,
+  imaging_block
+  )
+  header_rows <- table1$Characteristic %in% c("Race", "18F-Flortaucipir  Imaging", "Clinical Diagnosis", "ADNC")
+
+  
+  gt_table <- format_table(table = table1, N = N, header_rows = header_rows)
+  return(gt_table)
+}
+
+make_demographics_table_INDD(ad_path_oldpet[ad_path_oldpet$ERC_Eligible_Q | ad_path_oldpet$Amyg_Eligible_Q | ad_path_oldpet$Hipp_Eligible_Q, ])
+
+# Make diagnostics tab
+make_dx_crosstab_INDD <- function(my_df) {
+  npdx1 <- my_df %>%
+    filter(!is.na(NPDx1)) %>%
+    dplyr::count(Diagnosis = NPDx1, name = "Primary_N")
+
+  npdx2 <- my_df %>%
+    filter(!is.na(NPDx2)) %>%
+    dplyr::count(Diagnosis = NPDx2, name = "Secondary_N")
+
+  npdx_table <- full_join(npdx1, npdx2, by = "Diagnosis") %>%
+    mutate(across(c(Primary_N, Secondary_N), ~replace_na(., 0L))) %>%
+    mutate(
+      Primary_Pct   = Primary_N   / sum(Primary_N)   * 100,
+      Secondary_Pct = Secondary_N / sum(Secondary_N) * 100
+    ) %>%
+    arrange(desc(Primary_N))
+
+  gt_table <- npdx_table %>%
+    gt() %>%
+    fmt_number(columns = c(Primary_Pct, Secondary_Pct), decimals = 1) %>%
+    cols_merge_n_pct(col_n = Primary_N,   col_pct = Primary_Pct) %>%
+    cols_merge_n_pct(col_n = Secondary_N, col_pct = Secondary_Pct) %>%
+    cols_label(
+      Primary_N   = "Primary",
+      Secondary_N = "Secondary"
+    ) %>%
+    cols_align(align = "left", columns = Diagnosis) %>%
+    cols_align(align = "center", columns = c(Primary_N, Secondary_N)) %>%
+    tab_options(
+      table.border.top.style = "solid",
+      table.border.top.width = px(2),
+      table.border.bottom.style = "solid",
+      table.border.bottom.width = px(2),
+      column_labels.border.bottom.style = "solid",
+      table_body.hlines.style = "none"
+    )
+
+  return(gt_table)
+}
+
+make_dx_crosstab_INDD(ad_path_oldpet[ad_path_oldpet$ERC_Eligible_Q | ad_path_oldpet$Amyg_Eligible_Q | ad_path_oldpet$Hipp_Eligible_Q, ])
+
+#ABC Tables
+make_staging_table_INDD <- function(my_df) {
+  vars <- list(
+    "A"          = my_df$ABeta,
+    "B"          = my_df$B_Score,
+    "C"          = my_df$CERAD,
+    "LATE Stage" = my_df$LATE_Stage
+  )
+
+  rows <- map2_dfr(vars, names(vars), function(vec, label) {
+    tibble(
+      Characteristic = label,
+      `0` = sum(vec == 0, na.rm = TRUE),
+      `1` = sum(vec == 1, na.rm = TRUE),
+      `2` = sum(vec == 2, na.rm = TRUE),
+      `3` = sum(vec == 3, na.rm = TRUE)
+    )
+  })
+
+  gt_table <- rows %>%
+    gt() %>%
+    tab_spanner(label = "Staging", columns = c(`0`, `1`, `2`, `3`)) %>%
+    cols_align(align = "left", columns = Characteristic) %>%
+    cols_align(align = "center", columns = c(`0`, `1`, `2`, `3`)) %>%
+    tab_options(
+      table.border.top.style = "solid",
+      table.border.top.width = px(2),
+      table.border.bottom.style = "solid",
+      table.border.bottom.width = px(2),
+      column_labels.border.bottom.style = "solid",
+      table_body.hlines.style = "none"
+    )
+
+  return(gt_table)
+}
+make_staging_table_INDD(ad_path_oldpet[ad_path_oldpet$ERC_Eligible_Q | ad_path_oldpet$Amyg_Eligible_Q | ad_path_oldpet$Hipp_Eligible_Q, ])
+
+
+```
