@@ -232,7 +232,7 @@ library(ppcor)
 library(boot)
 library(DescTools)
 
-region_matrix <- matrix(c("Hipp", "Amyg", "ERC", "HippocampusAvg_SUVR", "Amygdala_SUVR", "ERCBA35_SUVR", "tangles_hippocampus", "tangles_Amy", "tangles_aERC", "threads_hippocampus", "threads_Amy", "threads_aERC", "Hipp_SQ_Avg", "AmygTau", "ECTau"), nrow = 3) %>% as.data.frame()
+region_matrix <- matrix(c("Hipp", "Amyg", "ERC", "Anterior_hippocampus_SUVR", "Amygdala_SUVR", "ERCBA35_SUVR", "tangles_hippocampus", "tangles_Amy", "tangles_aERC", "threads_hippocampus", "threads_Amy", "threads_aERC", "Hipp_SQ_Avg", "AmygTau", "ECTau"), nrow = 3) %>% as.data.frame()
 colnames(region_matrix) <- c("Region", "PET", "Tangles", "Threads", "SQ")
 rownames(region_matrix) <- region_matrix$Region
 
@@ -342,14 +342,17 @@ cors_earlyBraak_covary_AMI_contralateral <- run_all_cors(df = ad_path_oldpet_con
 
 ```{r Plotting: Set up long data}
 
+old_pet_processed$AnteriorHippocampus_SUVR <- old_pet_processed$Anterior_hippocampus_SUVR
+old_pet_processed_contralateral$AnteriorHippocampus_SUVR <- old_pet_processed_contralateral$Anterior_hippocampus_SUVR
+
 # Pivot PET data ------------------------------------------------
-oldpet_long <- pivot_longer(old_pet_processed[, c("INDDID", "Amygdala_SUVR", "ERCBA35_SUVR", "HippocampusAvg_SUVR")], cols = -INDDID, names_to = c("region", "path_type"), 
+oldpet_long <- pivot_longer(old_pet_processed[, c("INDDID", "Amygdala_SUVR", "ERCBA35_SUVR", "AnteriorHippocampus_SUVR")], cols = -INDDID, names_to = c("region", "path_type"), 
                          names_sep = "_", 
                          values_to = "PET_SUVR")
 oldpet_long <- oldpet_long[, c("INDDID", "region", "PET_SUVR")]
 
 # Pivot contralateral PET data ------------------------------------------------
-oldpet_contralateral_long <- pivot_longer(old_pet_processed_contralateral[, c("INDDID", "Amygdala_SUVR", "ERCBA35_SUVR", "HippocampusAvg_SUVR")], cols = -INDDID, names_to = c("region", "path_type"), 
+oldpet_contralateral_long <- pivot_longer(old_pet_processed_contralateral[, c("INDDID", "Amygdala_SUVR", "ERCBA35_SUVR", "AnteriorHippocampus_SUVR")], cols = -INDDID, names_to = c("region", "path_type"), 
                          names_sep = "_", 
                          values_to = "PET_SUVR")
 oldpet_contralateral_long <- oldpet_contralateral_long[, c("INDDID", "region", "PET_SUVR")]
@@ -359,11 +362,11 @@ path_long <- pivot_longer(autopsy_data[, c("INDDID", "tangles_Amy", "threads_Amy
                          names_sep = "_", 
                          values_to = "Neuropath")
 path_long <- path_long[, c("INDDID", "region", "path_type", "Neuropath")]
-path_long$region <- mapvalues(path_long$region, c("Amy", "hippocampus", "aERC"), c("Amygdala", "HippocampusAvg", "ERCBA35"))
+path_long$region <- mapvalues(path_long$region, c("Amy", "hippocampus", "aERC"), c("Amygdala", "AnteriorHippocampus", "ERCBA35"))
 
 # Pivot SQ pathology data ------------------------------------------------
 sq_long <- pivot_longer(autopsy_data[, c("INDDID", "AmygTau", "ECTau", "Hipp_SQ_Avg")], cols = -INDDID, names_to = "region", values_to = "SemiQuantitative")
-sq_long$region <- mapvalues(sq_long$region, c("AmygTau", "ECTau", "Hipp_SQ_Avg"), c("Amygdala", "ERCBA35", "HippocampusAvg"))
+sq_long$region <- mapvalues(sq_long$region, c("AmygTau", "ECTau", "Hipp_SQ_Avg"), c("Amygdala", "ERCBA35", "AnteriorHippocampus"))
 
 # Merge ------------------------------------------------                            
 path_oldpet_long <- left_join(oldpet_long, path_long, by = c("INDDID", "region")) 
@@ -392,7 +395,7 @@ sq_oldpet_contralateral_long <- left_join(sq_oldpet_contralateral_long, demograp
 ```{r Plot Ipsilateral}
 # Plot tangles
 ggplot(path_oldpet_long[path_oldpet_long$path_type %in% "tangles" & path_oldpet_long$INDDID %in% ad_path_oldpet$INDDID, ], aes(x = Neuropath, y = PET_SUVR)) + 
-  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "AnteriorHippocampus" = "Hippocampus")), scales = "free") + 
   geom_point(aes(color = B_Score_Chrt), size = 3) + 
   amanda_theme + 
   labs(x = "Postmortem Tangles Measurement", y = "SUVR", color = "Braak Stage", title = "Tangle Pathology") + 
@@ -411,7 +414,7 @@ ggsave("/Users/amandadenning/Box/Abstracts/HAI_2027/tangles_plot.png", width = 1
 
 # Plot Threads
 ggplot(path_oldpet_long[path_oldpet_long$path_type %in% "threads" & path_oldpet_long$INDDID %in% ad_path_oldpet$INDDID, ], aes(x = Neuropath, y = PET_SUVR)) + 
-  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "AnteriorHippocampus" = "Hippocampus")), scales = "free") + 
   geom_point(aes(color = B_Score_Chrt), size =3) + 
   amanda_theme + 
   labs(x = "Postmortem Threads Measurement", y = "SUVR", color = "Braak Stage", title = "Thread Pathology") + 
@@ -431,7 +434,7 @@ ggsave("/Users/amandadenning/Box/Abstracts/HAI_2027/threads_plot.png", width = 1
 
 # Plot SQ
 ggplot(sq_oldpet_long[sq_oldpet_long$INDDID %in% ad_path_oldpet$INDDID, ], aes(x = SemiQuantitative, y = PET_SUVR)) + 
-  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "AnteriorHippocampus" = "Hippocampus")), scales = "free") + 
   geom_point(aes(color = B_Score_Chrt), size =3) + 
   amanda_theme + 
   labs(x = "Postmortem Semi-Quantitative Tau Rating", y = "SUVR", color = "Braak Stage", title = "Semi-Quantitative Pathology Rating") + 
@@ -455,7 +458,7 @@ ggsave("/Users/amandadenning/Box/Abstracts/HAI_2027/SQ_plot.png", width = 13, he
 ```{r Plot Contralateral}
 # Plot tangles
 ggplot(path_oldpet_contralateral_long[path_oldpet_contralateral_long$path_type %in% "tangles" & path_oldpet_contralateral_long$INDDID %in% ad_path_oldpet_contra$INDDID, ], aes(x = Neuropath, y = PET_SUVR)) + 
-  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "AnteriorHippocampus" = "Hippocampus")), scales = "free") + 
   geom_point(aes(color = B_Score_Chrt), size = 3) + 
   amanda_theme + 
   labs(x = "Postmortem Tangles Measurement", y = "SUVR", color = "Braak Stage", title = "Contralateral Tangle Pathology") + 
@@ -474,7 +477,7 @@ ggsave("/Users/amandadenning/Box/Abstracts/HAI_2027/tangles_plot_contralateral.p
 
 # Plot Threads
 ggplot(path_oldpet_contralateral_long[path_oldpet_contralateral_long$path_type %in% "threads" & path_oldpet_contralateral_long$INDDID %in% ad_path_oldpet_contra$INDDID, ], aes(x = Neuropath, y = PET_SUVR)) + 
-  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "AnteriorHippocampus" = "Hippocampus")), scales = "free") + 
   geom_point(aes(color = B_Score_Chrt), size =3) + 
   amanda_theme + 
   labs(x = "Postmortem Threads Measurement", y = "SUVR", color = "Braak Stage", title = "Contralateral Thread Pathology") + 
@@ -494,7 +497,7 @@ ggsave("/Users/amandadenning/Box/Abstracts/HAI_2027/threads_plot_contralateral.p
 
 # Plot SQ
 ggplot(sq_oldpet_contralateral_long[sq_oldpet_contralateral_long$INDDID %in% ad_path_oldpet_contra$INDDID, ], aes(x = SemiQuantitative, y = PET_SUVR)) + 
-  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "HippocampusAvg" = "Hippocampus")), scales = "free") + 
+  facet_wrap(~ region, labeller = as_labeller(c("Amygdala" = "Amygdala", "ERCBA35" = "Entorhinal Cortex", "AnteriorHippocampus" = "Hippocampus")), scales = "free") + 
   geom_point(aes(color = B_Score_Chrt), size =3) + 
   amanda_theme + 
   labs(x = "Postmortem Semi-Quantitative Tau Rating", y = "SUVR", color = "Braak Stage", title = "Contralateral Semi-Quantitative Pathology Rating") + 
